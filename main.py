@@ -10,9 +10,13 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(API_TOKEN)
 dp = Dispatcher()
 
-@dp.message(Command(commands['start','Start']))
+@dp.message(Command(commands = ['start','Start']))
 async def start_handler(message: types.Message):
     await message.answer('Привет! Напиши любимый фильм')
+
+@dp.message()
+async def update_handler(message: types.Message):
+    await message.answer('Снова здарова')
 
 
 async def main():
