@@ -9,8 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-from db import DB
-from db import CREATE_USERS_SQL
+from db import *
 
 API_TOKEN = ""
 
@@ -33,14 +32,23 @@ class FavMovie(StatesGroup):
     waiting_for_title = State()
 
 @dp.message(Command(commands = ['start','Start']))
-async def start_handler(message: types.Message, state: FSMContext):
+async def start_handler(message: types.Message, state: FSMContext, pool: asyncpg.Pool):
+    async with pool.acquire() as conn:
+        await conn.execute(UPDATE_USER, message.from_user.id, message.from_user.username)
     await state.set_state(FavMovie.waiting_for_title)
     await message.answer('Привет! Какой твой любимый фильм?')
 
-@dp.message(Command(commands = ['favorite_film', 'Favorite_film']))
+@dp.message(Command(commands = ['set_film', 'Set_film']))
 async def fav_handler(message: types.Message, state: FSMContext):
     await state.set_state(FavMovie.waiting_for_title)
     await message.answer("Какой твой любимый фильм?")
+
+@dp.message(Command(commands=['favorite_film', 'Favorite_film']))
+async def fav_handler(message: types.Message, pool: asyncpg.Pool):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(GET_FAVORITE, message.from_user.id)
+    fav = row["favorite_movie"] if row and row["favorite_movie"] else None
+    await message.answer(f"Твой любимый фильм: {fav}" if fav else "Ещё не задан")
 
 @dp.message(Command(commands = ['random_film', 'Random_film']))
 async def rand_handler(message: types.Message):
@@ -57,11 +65,14 @@ async def catch_any_command(message: types.Message):
     await message.answer(f"Попробуйте ввести другую команду вместо {message.text}")
 
 @dp.message(FavMovie.waiting_for_title, F.text)
-async def process_fav(message: types.Message, state: FSMContext):
+async def process_fav(message: types.Message, state: FSMContext, pool: asyncpg.Pool):
     title = message.text.strip()
     if title == 'Букины' or title == 'букины':
         await message.answer(f"ООО, {title} 10/10")
     elif title[0] != '/':
+        async with pool.acquire() as conn:
+            status = await conn.execute(SET_FAVORITE, message.from_user.id, title)
+        print(status)
         await message.answer(f"Запомнил твой любимый фильм: {title}")
     else:
         await message.answer(f"К сожалению это не фильм")

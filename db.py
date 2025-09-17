@@ -19,7 +19,7 @@ ON CONFLICT (user_id) DO UPDATE
 """
 
 SET_FAVORITE = """
-UPDATE users SET favorite_movie = $2, last_seen = now()
+UPDATE users SET favorite_movie = $2
 WHERE user_id = $1;
 """
 
