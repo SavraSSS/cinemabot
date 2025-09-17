@@ -1,7 +1,7 @@
 import asyncpg
 
 
-DATABASE_URL= ""
+DATABASE_URL='postgresql://botuser:mypassword@localhost:5432/cinemabot'
 
 CREATE_USERS_SQL = """
 CREATE TABLE IF NOT EXISTS users (

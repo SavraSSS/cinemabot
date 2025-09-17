@@ -1,12 +1,16 @@
 import asyncio
 import logging
 import random
+import asyncpg
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 from db import DB
+from db import CREATE_USERS_SQL
 
 API_TOKEN = ""
 
@@ -14,6 +18,11 @@ err_phr = ['Упс... такой команды нет', 'Такой коман�
 
 rand_phr = ['Вот тебе случайный фильм на сегодня:', 'Посмотри вот это:', 'Рекомендую посмотреть', 'Рандом есть рандом, придется смотреть']
 rand_mas = ['Остров проклятых', 'Престиж', 'Интерстеллар', 'Титаник', 'Хатико', 'Смешарики', 'Начало', 'Довод', 'Миссия невыполнима', 'Назад в будущее']
+
+ikb = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="Буду смотреть", callback_data="like_random_film"),
+     InlineKeyboardButton(text="Не нравится", callback_data="dislike_random_film")],
+])
 
 logging.basicConfig(level=logging.INFO)
 
@@ -23,14 +32,8 @@ dp = Dispatcher()
 class FavMovie(StatesGroup):
     waiting_for_title = State()
 
-#def repo(event) -> DB:
-    #return event.dispatcher["db"]
-
 @dp.message(Command(commands = ['start','Start']))
 async def start_handler(message: types.Message, state: FSMContext):
-    #await repo(message).upsert_user(
-    #    user_id=message.from_user.id,
-    #    username=message.from_user.username)
     await state.set_state(FavMovie.waiting_for_title)
     await message.answer('Привет! Какой твой любимый фильм?')
 
@@ -40,11 +43,12 @@ async def fav_handler(message: types.Message, state: FSMContext):
     await message.answer("Какой твой любимый фильм?")
 
 @dp.message(Command(commands = ['random_film', 'Random_film']))
-async def rand_handler(message: types.Message, state: FSMContext):
-    await message.answer(random.choice(rand_phr) + ' ' + random.choice(rand_mas))
+async def rand_handler(message: types.Message):
+    await message.answer(random.choice(rand_phr) + ' ' + random.choice(rand_mas), reply_markup=ikb)
+    
 
 @dp.message(Command(commands=['info','Info']))
-async def info_handler(message: types.Message, state: FSMContext):
+async def info_handler(message: types.Message):
     await message.answer("Основная цель существования бота - помочь с выбором фильмов и сериалов, подсказать на основе ваших предпочтений\nРазработчик - SavraSSS\n2025")
 
 @dp.message(F.text.startswith("/"))
@@ -69,12 +73,31 @@ async def update_handler(message: types.Message):
     await message.answer('Здарова')
 
 
+@dp.callback_query()
+async def callbacks_handler(callback: types.CallbackQuery):
+    if callback.data == "like_random_film":
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer("Отлично")
+    elif callback.data == "dislike_random_film":
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer("Жаль, попробуй еще раз")
+
+
 async def main():
+    pool = await asyncpg.create_pool('postgresql://bot:0109@localhost:5432/cinemabot', min_size=1, max_size=5)
+
+    async with pool.acquire() as conn:
+        await conn.execute(CREATE_USERS_SQL)
+
+    dp["pool"] = pool
     async with bot:
         await bot.delete_webhook(drop_pending_updates=True)
         me = await bot.get_me()
         logging.info(f"Bot started as @{me.username}")
-        await dp.start_polling(bot)
+        try:
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        finally:
+            await pool.close()
 
 
 if __name__ == "__main__":
