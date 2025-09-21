@@ -98,7 +98,6 @@ async def rand_handler(message: types.Message):
             reply_markup=ikb
         )
         return
-    
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=10),
         headers={"X-API-KEY": KP_TOKEN}
@@ -111,24 +110,20 @@ async def rand_handler(message: types.Message):
                 reply_markup=ikb
             )
             return
-
     if not movie:
         await message.answer(
             random.choice(rand_phr) + ' ' + random.choice(rand_mas),
             reply_markup=ikb
         )
         return
-
     poster = kp_pick_poster_url(movie)
     caption = kp_movie_caption(movie)
-
     if poster:
         try:
             await message.answer_photo(photo=poster, caption=caption, reply_markup=ikb)
             return
         except Exception:
             pass
-
     await message.answer(caption, reply_markup=ikb)
     
 
