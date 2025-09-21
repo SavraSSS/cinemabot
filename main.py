@@ -65,9 +65,10 @@ def kp_movie_caption(m: dict) -> str:
     year = m.get("year") or ""
     rating = m.get("rating") or {}
     kp = rating.get("kp") if isinstance(rating, dict) else rating
+    description = m.get("shortDescription") or m.get("description") or "Описание недоступно"
     genres = ", ".join([g.get("name","") for g in (m.get("genres") or [])][:3]) or "—"
     kp_id = m.get("id")
-    return f"{title} ({year})\nРейтинг KP: {kp or '—'}\nЖанры: {genres}\n\nЧто думаешь?"
+    return f"{title} ({year})\nРейтинг KP: {kp or '—'}\nЖанры: {genres}\n\n{description}\n\nЧто думаешь?"
 
 async def kp_random_movie(session: aiohttp.ClientSession) -> dict | None:
     params = {
