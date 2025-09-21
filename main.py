@@ -13,8 +13,7 @@ import aiohttp
 
 from db import *
 
-API_TOKEN = ""
-KINOPOISK_TOKEN = ""
+from data import API_TOKEN, KINOPOISK_TOKEN
 
 KP_TOKEN = KINOPOISK_TOKEN
 
