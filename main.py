@@ -9,9 +9,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
+import aiohttp
+
 from db import *
 
-API_TOKEN = ""
+API_TOKEN = "8393538639:AAEGKABUW_bsvsx2j34pt9lJUvmAsh7xVv0"
+KINOPOISK_TOKEN = "SFJVEW7-XNN40YP-NZ72DHE-SV9DZHG"
+
+KP_TOKEN = KINOPOISK_TOKEN
 
 err_phr = ['Упс... такой команды нет', 'Такой команды я пока не знаю, но обязательно узнаю!', 'Я не знаю эту команду']
 
@@ -20,7 +25,8 @@ rand_mas = ['Остров проклятых', 'Престиж', 'Интерст
 
 ikb = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Буду смотреть", callback_data="like_random_film"),
-     InlineKeyboardButton(text="Не нравится", callback_data="dislike_random_film")],
+     InlineKeyboardButton(text="Не нравится", callback_data="dislike_random_film"),
+     InlineKeyboardButton(text="Уже смотрел", callback_data="already_watch")],
 ])
 
 logging.basicConfig(level=logging.INFO)
@@ -50,9 +56,80 @@ async def fav_handler(message: types.Message, pool: asyncpg.Pool):
     fav = row["favorite_movie"] if row and row["favorite_movie"] else None
     await message.answer(f"Твой любимый фильм: {fav}" if fav else "Ещё не задан")
 
+
+def kp_pick_poster_url(m: dict) -> str | None:
+    poster = m.get("poster") or {}
+    return poster.get("url")
+
+def kp_movie_caption(m: dict) -> str:
+    title = m.get("name") or m.get("alternativeName") or "Без названия"
+    year = m.get("year") or ""
+    rating = m.get("rating") or {}
+    kp = rating.get("kp") if isinstance(rating, dict) else rating
+    genres = ", ".join([g.get("name","") for g in (m.get("genres") or [])][:3]) or "—"
+    kp_id = m.get("id")
+    return f"{title} ({year})\nРейтинг KP: {kp or '—'}\nЖанры: {genres}\n\nЧто думаешь?"
+
+async def kp_random_movie(session: aiohttp.ClientSession) -> dict | None:
+    params = {
+        "type": "movie",
+        "notNullFields": "poster.url",
+        "rating.kp": "6-10",
+        "year": "1980-2025",
+    }
+    url = "https://api.kinopoisk.dev/v1.4/movie/random"
+    for attempt in range(3):
+        async with session.get(url, params=params) as r:
+            if r.status == 429 and attempt < 2:  # троттлинг
+                await asyncio.sleep(0.8 * (attempt + 1))
+                continue
+            r.raise_for_status()
+            return await r.json()
+    return None
+
+
+
 @dp.message(Command(commands = ['random_film', 'Random_film']))
 async def rand_handler(message: types.Message):
-    await message.answer(random.choice(rand_phr) + ' ' + random.choice(rand_mas), reply_markup=ikb)
+    if not KP_TOKEN:
+        print('error with connection to kp')
+        await message.answer(
+            random.choice(rand_phr) + ' ' + random.choice(rand_mas),
+            reply_markup=ikb
+        )
+        return
+    
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=10),
+        headers={"X-API-KEY": KP_TOKEN}
+    ) as session:
+        try:
+            movie = await kp_random_movie(session)
+        except Exception as e:
+            await message.answer(
+                random.choice(rand_phr) + ' ' + random.choice(rand_mas),
+                reply_markup=ikb
+            )
+            return
+
+    if not movie:
+        await message.answer(
+            random.choice(rand_phr) + ' ' + random.choice(rand_mas),
+            reply_markup=ikb
+        )
+        return
+
+    poster = kp_pick_poster_url(movie)
+    caption = kp_movie_caption(movie)
+
+    if poster:
+        try:
+            await message.answer_photo(photo=poster, caption=caption, reply_markup=ikb)
+            return
+        except Exception:
+            pass
+
+    await message.answer(caption, reply_markup=ikb)
     
 
 @dp.message(Command(commands=['info','Info']))
@@ -67,7 +144,7 @@ async def catch_any_command(message: types.Message):
 @dp.message(FavMovie.waiting_for_title, F.text)
 async def process_fav(message: types.Message, state: FSMContext, pool: asyncpg.Pool):
     title = message.text.strip()
-    if title == 'Букины' or title == 'букины':
+    if title == 'Букины' or title == 'букины' or title == 'Смешарики' or title == 'смешарики':
         await message.answer(f"ООО, {title} 10/10")
     elif title[0] != '/':
         async with pool.acquire() as conn:
@@ -92,6 +169,9 @@ async def callbacks_handler(callback: types.CallbackQuery):
     elif callback.data == "dislike_random_film":
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.answer("Жаль, попробуй еще раз")
+    elif callback.data == "already_watch":
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.answer("О как, может стоит пересмотреть")
 
 
 async def main():
