@@ -8,6 +8,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import aiohttp
 
@@ -27,6 +28,26 @@ ikb = InlineKeyboardMarkup(inline_keyboard=[
      InlineKeyboardButton(text="Не нравится", callback_data="dislike_random_film"),
      InlineKeyboardButton(text="Уже смотрел", callback_data="already_watch")],
 ])
+
+GENRE_OPTIONS: list[tuple[str, str]] = [
+    ("Любой", "any"),
+    ("Комедия", "комедия"),
+    ("Драма", "драма"),
+    ("Боевик", "боевик"),
+    ("Фантастика", "фантастика"),
+    ("Триллер", "триллер"),
+    ("Мультфильм", "мультфильм"),
+    ("Криминал", "криминал"),
+    ("Приключения", "приключения"),
+    ("Ужасы", "ужасы"),
+]
+
+def build_genre_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for text, key in GENRE_OPTIONS:
+        kb.button(text=text, callback_data=f"rndg:{key}")
+    kb.adjust(3)
+    return kb.as_markup()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -70,17 +91,20 @@ def kp_movie_caption(m: dict) -> str:
     kp_id = m.get("id")
     return f"{title} ({year})\nРейтинг KP: {kp or '—'}\nЖанры: {genres}\n\n{description}\n\nЧто думаешь?"
 
-async def kp_random_movie(session: aiohttp.ClientSession) -> dict | None:
+async def kp_random_movie_with_genre(session: aiohttp.ClientSession, genre_ru: str | None) -> dict | None:
     params = {
         "type": "movie",
         "notNullFields": "poster.url",
         "rating.kp": "6-10",
         "year": "1980-2025",
     }
+    if genre_ru and genre_ru != "any":
+        params["genres.name"] = genre_ru
+
     url = "https://api.kinopoisk.dev/v1.4/movie/random"
     for attempt in range(3):
         async with session.get(url, params=params) as r:
-            if r.status == 429 and attempt < 2:  # троттлинг
+            if r.status == 429 and attempt < 2:
                 await asyncio.sleep(0.8 * (attempt + 1))
                 continue
             r.raise_for_status()
@@ -90,41 +114,83 @@ async def kp_random_movie(session: aiohttp.ClientSession) -> dict | None:
 
 
 @dp.message(Command(commands = ['random_film', 'Random_film']))
-async def rand_handler(message: types.Message):
+async def rand_handler(message: types.Message): 
+    await message.answer("Выбери жанр для случайного фильма 👇", reply_markup=build_genre_kb())
+
+@dp.callback_query(F.data.startswith("rndg:"))
+async def random_by_genre(cb: types.CallbackQuery):
     if not KP_TOKEN:
-        print('error with connection to kp')
-        await message.answer(
+        await cb.message.answer(
             random.choice(rand_phr) + ' ' + random.choice(rand_mas),
             reply_markup=ikb
         )
+        await cb.answer("API Кинопоиска не настроено")
         return
+
+    genre_key = cb.data.split(":", 1)[1]
+    chosen_text = next((t for t, k in GENRE_OPTIONS if k == genre_key), "Любой")
+    await cb.message.edit_text(f"Жанр: <b>{chosen_text}</b>\nИщу случайный фильм…", parse_mode="HTML")
+
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=10),
         headers={"X-API-KEY": KP_TOKEN}
     ) as session:
         try:
-            movie = await kp_random_movie(session)
-        except Exception as e:
-            await message.answer(
-                random.choice(rand_phr) + ' ' + random.choice(rand_mas),
-                reply_markup=ikb
-            )
-            return
+            movie = await kp_random_movie_with_genre(session, genre_key)
+        except Exception:
+            movie = None
+
     if not movie:
-        await message.answer(
-            random.choice(rand_phr) + ' ' + random.choice(rand_mas),
-            reply_markup=ikb
-        )
+        await cb.message.answer("Не удалось найти фильм под этот жанр. Попробуй другой жанр 🙂",
+                                reply_markup=build_genre_kb())
+        await cb.answer()
         return
+
     poster = kp_pick_poster_url(movie)
     caption = kp_movie_caption(movie)
-    if poster:
-        try:
-            await message.answer_photo(photo=poster, caption=caption, reply_markup=ikb)
-            return
-        except Exception:
-            pass
-    await message.answer(caption, reply_markup=ikb)
+    try:
+        if poster:
+            await cb.message.answer_photo(photo=poster, caption=caption, reply_markup=ikb)
+        else:
+            await cb.message.answer(caption, reply_markup=ikb)
+    except Exception:
+        await cb.message.answer(caption, reply_markup=ikb)
+    await cb.answer()
+# async def rand_handler(message: types.Message):
+#     if not KP_TOKEN:
+#         print('error with connection to kp')
+#         await message.answer(
+#             random.choice(rand_phr) + ' ' + random.choice(rand_mas),
+#             reply_markup=ikb
+#         )
+#         return
+#     async with aiohttp.ClientSession(
+#         timeout=aiohttp.ClientTimeout(total=10),
+#         headers={"X-API-KEY": KP_TOKEN}
+#     ) as session:
+#         try:
+#             movie = await kp_random_movie(session)
+#         except Exception as e:
+#             await message.answer(
+#                 random.choice(rand_phr) + ' ' + random.choice(rand_mas),
+#                 reply_markup=ikb
+#             )
+#             return
+#     if not movie:
+#         await message.answer(
+#             random.choice(rand_phr) + ' ' + random.choice(rand_mas),
+#             reply_markup=ikb
+#         )
+#         return
+#     poster = kp_pick_poster_url(movie)
+#     caption = kp_movie_caption(movie)
+#     if poster:
+#         try:
+#             await message.answer_photo(photo=poster, caption=caption, reply_markup=ikb)
+#             return
+#         except Exception:
+#             pass
+#     await message.answer(caption, reply_markup=ikb)
     
 
 @dp.message(Command(commands=['info','Info']))
